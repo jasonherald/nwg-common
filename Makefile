@@ -6,7 +6,7 @@
 CARGO ?= cargo
 
 .PHONY: all build build-release test lint check-tools \
-        lint-fmt lint-clippy lint-deny lint-audit lint-docs \
+        lint-fmt lint-clippy lint-test lint-deny lint-audit lint-docs \
         sonar clean help
 
 all: build
@@ -50,6 +50,13 @@ lint-clippy:
 	@echo "── Clippy ──"
 	$(CARGO) clippy --all-targets -- -D warnings
 
+# Plain test run — no clippy, unlike the top-level `test` target.
+# `lint` composes this (instead of `test`) so clippy runs exactly
+# once per `make lint`, via `lint-clippy`.
+lint-test:
+	@echo "── Tests ──"
+	$(CARGO) test
+
 lint-deny:
 	@echo "── Cargo Deny (licenses, advisories, bans, sources) ──"
 	$(CARGO) deny check
@@ -62,7 +69,7 @@ lint-docs:
 	@echo "── Docs (missing-docs enforcement) ──"
 	$(CARGO) rustdoc -- -D missing-docs
 
-lint: check-tools lint-fmt lint-clippy test lint-deny lint-audit lint-docs
+lint: check-tools lint-fmt lint-clippy lint-test lint-deny lint-audit lint-docs
 	@echo ""
 	@echo "All local checks passed ✓"
 
