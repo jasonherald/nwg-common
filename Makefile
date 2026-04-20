@@ -5,7 +5,9 @@
 
 CARGO ?= cargo
 
-.PHONY: all build build-release test lint check-tools sonar clean help
+.PHONY: all build build-release test lint check-tools \
+        lint-fmt lint-clippy lint-deny lint-audit lint-docs \
+        sonar clean help
 
 all: build
 
@@ -14,7 +16,7 @@ help:
 	@echo "  make build          Debug build"
 	@echo "  make build-release  Release build"
 	@echo "  make test           cargo test + cargo clippy --all-targets"
-	@echo "  make lint           Full local check: fmt + clippy + test + deny + audit"
+	@echo "  make lint           Full local check: fmt + clippy + test + deny + audit + docs"
 	@echo "  make sonar          Run SonarQube scan (requires sonar-scanner + .env token)"
 	@echo "  make clean          cargo clean"
 
@@ -38,24 +40,29 @@ check-tools:
 		$(CARGO) install cargo-audit; \
 	fi
 
-lint: check-tools
+# Individual lint subtargets — each runnable on its own; `make lint`
+# chains them so you can bisect a failing step (e.g. `make lint-clippy`).
+lint-fmt:
 	@echo "── Format ──"
 	$(CARGO) fmt --all --check
-	@echo ""
+
+lint-clippy:
 	@echo "── Clippy ──"
 	$(CARGO) clippy --all-targets -- -D warnings
-	@echo ""
-	@echo "── Tests ──"
-	$(CARGO) test
-	@echo ""
+
+lint-deny:
 	@echo "── Cargo Deny (licenses, advisories, bans, sources) ──"
 	$(CARGO) deny check
-	@echo ""
+
+lint-audit:
 	@echo "── Cargo Audit (dependency CVEs) ──"
 	$(CARGO) audit
-	@echo ""
+
+lint-docs:
 	@echo "── Docs (missing-docs enforcement) ──"
 	$(CARGO) rustdoc -- -D missing-docs
+
+lint: check-tools lint-fmt lint-clippy test lint-deny lint-audit lint-docs
 	@echo ""
 	@echo "All local checks passed ✓"
 
