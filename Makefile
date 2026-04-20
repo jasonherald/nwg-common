@@ -93,7 +93,7 @@ sonar:
 	@command -v "$(SONAR_SCANNER)" >/dev/null 2>&1 || [ -x "$(SONAR_SCANNER)" ] || { \
 		echo "ERROR: sonar-scanner not found (looked at $(SONAR_SCANNER))"; exit 1; \
 	}
-	@TOKEN="$$(awk -F= '/^SONAR_TOKEN=/{sub(/^[ \t]+|[ \t]+$$/, "", $$2); print $$2}' ./.env)"; \
+	@TOKEN="$$(awk '/^SONAR_TOKEN=/{sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t]+$$/, ""); print; exit}' ./.env)"; \
 	test -n "$$TOKEN" || { echo "ERROR: SONAR_TOKEN is empty in .env"; exit 1; }; \
 	SONAR_TOKEN="$$TOKEN" \
 	SONAR_SCANNER_OPTS="-Djavax.net.ssl.trustStore=$(SONAR_TRUSTSTORE) -Djavax.net.ssl.trustStorePassword=$(SONAR_TRUSTSTORE_PASSWORD)" \
