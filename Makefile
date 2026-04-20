@@ -4,6 +4,10 @@
 # via `cargo add nwg-common`.
 
 CARGO ?= cargo
+SONAR_SCANNER ?= /opt/sonar-scanner/bin/sonar-scanner
+SONAR_HOST_URL ?= https://sonar.aaru.network
+SONAR_TRUSTSTORE ?= /tmp/sonar-truststore.jks
+SONAR_TRUSTSTORE_PASSWORD ?= changeit
 
 .PHONY: all build build-release test lint check-tools \
         lint-fmt lint-clippy lint-test lint-deny lint-audit lint-docs \
@@ -11,14 +15,19 @@ CARGO ?= cargo
 
 all: build
 
+define HELP_TEXT
+Targets:
+  make build          Debug build
+  make build-release  Release build
+  make test           cargo test + cargo clippy --all-targets
+  make lint           Full local check: fmt + clippy + test + deny + audit + docs
+  make sonar          Run SonarQube scan (requires sonar-scanner + .env token)
+  make clean          cargo clean
+endef
+export HELP_TEXT
+
 help:
-	@echo "Targets:"
-	@echo "  make build          Debug build"
-	@echo "  make build-release  Release build"
-	@echo "  make test           cargo test + cargo clippy --all-targets"
-	@echo "  make lint           Full local check: fmt + clippy + test + deny + audit + docs"
-	@echo "  make sonar          Run SonarQube scan (requires sonar-scanner + .env token)"
-	@echo "  make clean          cargo clean"
+	@echo "$$HELP_TEXT"
 
 build:
 	$(CARGO) build
@@ -73,12 +82,22 @@ lint: check-tools lint-fmt lint-clippy lint-test lint-deny lint-audit lint-docs
 	@echo ""
 	@echo "All local checks passed ✓"
 
+# Parse SONAR_TOKEN out of .env rather than sourcing the file — a
+# sourced .env executes any shell code it contains, which is a real
+# injection risk if a contributor ever saves it with an unintended
+# command or a value that contains backticks / $(…). awk extracts
+# just the value.
 sonar:
 	@echo "Running SonarQube scan..."
-	@. ./.env && export SONAR_TOKEN && \
-	SONAR_SCANNER_OPTS="-Djavax.net.ssl.trustStore=/tmp/sonar-truststore.jks -Djavax.net.ssl.trustStorePassword=changeit" \
-	/opt/sonar-scanner/bin/sonar-scanner \
-		-Dsonar.host.url=https://sonar.aaru.network
+	@test -f ./.env || { echo "ERROR: .env not found in repo root"; exit 1; }
+	@command -v "$(SONAR_SCANNER)" >/dev/null 2>&1 || [ -x "$(SONAR_SCANNER)" ] || { \
+		echo "ERROR: sonar-scanner not found (looked at $(SONAR_SCANNER))"; exit 1; \
+	}
+	@TOKEN="$$(awk -F= '/^SONAR_TOKEN=/{sub(/^[ \t]+|[ \t]+$$/, "", $$2); print $$2}' ./.env)"; \
+	test -n "$$TOKEN" || { echo "ERROR: SONAR_TOKEN is empty in .env"; exit 1; }; \
+	SONAR_TOKEN="$$TOKEN" \
+	SONAR_SCANNER_OPTS="-Djavax.net.ssl.trustStore=$(SONAR_TRUSTSTORE) -Djavax.net.ssl.trustStorePassword=$(SONAR_TRUSTSTORE_PASSWORD)" \
+	"$(SONAR_SCANNER)" -Dsonar.host.url="$(SONAR_HOST_URL)"
 
 clean:
 	$(CARGO) clean
