@@ -93,6 +93,15 @@ sonar:
 	@command -v "$(SONAR_SCANNER)" >/dev/null 2>&1 || [ -x "$(SONAR_SCANNER)" ] || { \
 		echo "ERROR: sonar-scanner not found (looked at $(SONAR_SCANNER))"; exit 1; \
 	}
+	@test -r "$(SONAR_TRUSTSTORE)" || { \
+		echo "ERROR: truststore not found or not readable at $(SONAR_TRUSTSTORE)"; \
+		echo "  (sonar.aaru.network uses a self-signed cert — regenerate with:"; \
+		echo "     openssl s_client -connect sonar.aaru.network:443 -showcerts </dev/null 2>/dev/null \\\\"; \
+		echo "       | awk '/BEGIN CERT/,/END CERT/' > /tmp/sonar-cert.pem && \\\\"; \
+		echo "     keytool -importcert -alias sonar-aaru -file /tmp/sonar-cert.pem \\\\"; \
+		echo "       -keystore $(SONAR_TRUSTSTORE) -storepass $(SONAR_TRUSTSTORE_PASSWORD) -noprompt)"; \
+		exit 1; \
+	}
 	@TOKEN="$$(awk '/^SONAR_TOKEN=/{sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t]+$$/, ""); print; exit}' ./.env)"; \
 	test -n "$$TOKEN" || { echo "ERROR: SONAR_TOKEN is empty in .env"; exit 1; }; \
 	SONAR_TOKEN="$$TOKEN" \
