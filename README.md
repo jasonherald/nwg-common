@@ -1,5 +1,8 @@
 # nwg-common
 
+[![crates.io](https://img.shields.io/crates/v/nwg-common.svg)](https://crates.io/crates/nwg-common)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Shared library backing the [`nwg-dock`](https://github.com/jasonherald/nwg-dock),
 [`nwg-drawer`](https://github.com/jasonherald/nwg-drawer), and
 [`nwg-notifications`](https://github.com/jasonherald/nwg-notifications) ports —
