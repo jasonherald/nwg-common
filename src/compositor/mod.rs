@@ -26,7 +26,15 @@ pub(crate) enum CompositorKind {
 
 /// CLI `--wm` flag values. `Uwsm` is a launch wrapper that falls through
 /// to auto-detection of the actual compositor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+///
+/// Variants serialize as kebab-case strings — `"hyprland"` / `"sway"` /
+/// `"uwsm"` — matching clap's ValueEnum lowercasing, so the same wire
+/// format works for both CLI and config-file consumers (e.g.,
+/// jasonherald/nwg-dock#33).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum WmOverride {
     /// Force the Hyprland backend regardless of environment.
     Hyprland,
@@ -201,5 +209,30 @@ mod tests {
     fn sanitize_preserves_paths_with_spaces() {
         let cmd = "/usr/bin/my app --arg=value";
         assert_eq!(sanitize_exec_command(cmd), cmd);
+    }
+
+    #[test]
+    fn wm_override_serde_round_trip() {
+        for variant in [WmOverride::Hyprland, WmOverride::Sway, WmOverride::Uwsm] {
+            let s = serde_json::to_string(&variant).expect("serialize");
+            let parsed: WmOverride = serde_json::from_str(&s).expect("deserialize");
+            assert_eq!(variant, parsed);
+        }
+    }
+
+    #[test]
+    fn wm_override_serde_uses_kebab_case() {
+        assert_eq!(
+            serde_json::to_string(&WmOverride::Hyprland).unwrap(),
+            r#""hyprland""#
+        );
+        assert_eq!(
+            serde_json::to_string(&WmOverride::Sway).unwrap(),
+            r#""sway""#
+        );
+        assert_eq!(
+            serde_json::to_string(&WmOverride::Uwsm).unwrap(),
+            r#""uwsm""#
+        );
     }
 }
