@@ -12,7 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > preserved in the monorepo's git log; this file only documents changes from
 > v0.3.0 onward.
 
-## [0.3.0] — Unreleased
+## [0.3.1] — 2026-04-28
+
+### Changed
+
+- `WmOverride` now derives `serde::Serialize` and `serde::Deserialize`,
+  with `#[serde(rename_all = "kebab-case")]` so variants serialize as
+  `"hyprland"` / `"sway"` / `"uwsm"` — matching clap's `ValueEnum`
+  lowercasing. Enables consumers (e.g.,
+  [`nwg-dock`](https://github.com/jasonherald/nwg-dock) #33) to
+  deserialize `WmOverride` from TOML/JSON config files.
+
+## [0.3.0] — 2026-04-20
 
 First standalone release. Extracts the shared library that underpins
 [`nwg-dock`](https://github.com/jasonherald/nwg-dock),
