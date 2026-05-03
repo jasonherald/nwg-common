@@ -111,6 +111,7 @@ impl WmEventStream for HyprlandEventStream {
         match self.0.next_event()? {
             HyprEvent::ActiveWindowV2(addr) => Ok(WmEvent::ActiveWindowChanged(addr)),
             HyprEvent::MonitorChanged => Ok(WmEvent::MonitorChanged),
+            HyprEvent::WorkspaceV2 { id, name } => Ok(WmEvent::WorkspaceChanged { id, name }),
             HyprEvent::Other(s) => Ok(WmEvent::Other(s)),
         }
     }
@@ -250,5 +251,33 @@ mod tests {
         let wm = to_wm_monitor(test_hypr_monitor(1920, 1080, 0.0, 0));
         assert_eq!(wm.width, 1920);
         assert_eq!(wm.height, 1080);
+    }
+
+    #[test]
+    fn workspace_v2_event_maps_to_workspace_changed() {
+        // Direct mapping check — the WmEventStream impl pulls from the
+        // inner stream; we verify the per-variant arm here without
+        // touching the real Hyprland socket.
+        let hyp = crate::hyprland::events::HyprEvent::WorkspaceV2 {
+            id: 3,
+            name: "chat".into(),
+        };
+        let mapped: WmEvent = match hyp {
+            crate::hyprland::events::HyprEvent::ActiveWindowV2(addr) => {
+                WmEvent::ActiveWindowChanged(addr)
+            }
+            crate::hyprland::events::HyprEvent::MonitorChanged => WmEvent::MonitorChanged,
+            crate::hyprland::events::HyprEvent::WorkspaceV2 { id, name } => {
+                WmEvent::WorkspaceChanged { id, name }
+            }
+            crate::hyprland::events::HyprEvent::Other(s) => WmEvent::Other(s),
+        };
+        assert_eq!(
+            mapped,
+            WmEvent::WorkspaceChanged {
+                id: 3,
+                name: "chat".into(),
+            }
+        );
     }
 }

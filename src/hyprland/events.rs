@@ -18,6 +18,11 @@ pub enum HyprEvent {
     ActiveWindowV2(String),
     /// Monitor added or removed.
     MonitorChanged,
+    /// Focused workspace changed. Carries the workspace's id and name
+    /// from Hyprland's `workspacev2` event so `nwg-common` can emit
+    /// the high-level `WmEvent::WorkspaceChanged` without a separate
+    /// IPC round-trip.
+    WorkspaceV2 { id: i32, name: String },
     /// Any other event we don't specifically handle.
     Other(String),
 }
@@ -97,6 +102,17 @@ fn parse_event(line: &str) -> HyprEvent {
         HyprEvent::ActiveWindowV2(addr)
     } else if line.starts_with("monitoraddedv2>>") || line.starts_with("monitorremoved>>") {
         HyprEvent::MonitorChanged
+    } else if let Some(rest) = line.strip_prefix("workspacev2>>") {
+        // Hyprland sends `workspacev2>>ID,NAME` — split on first comma.
+        // If the id can't parse, fall through to Other so we don't
+        // emit a half-formed event.
+        let mut parts = rest.splitn(2, ',');
+        let id_str = parts.next().unwrap_or("").trim();
+        let name = parts.next().unwrap_or("").trim().to_string();
+        match id_str.parse::<i32>() {
+            Ok(id) => HyprEvent::WorkspaceV2 { id, name },
+            Err(_) => HyprEvent::Other(line.to_string()),
+        }
     } else {
         HyprEvent::Other(line.to_string())
     }
@@ -171,5 +187,37 @@ mod tests {
             HyprEvent::ActiveWindowV2(addr) => assert_eq!(addr, "0xfeed"),
             other => panic!("expected ActiveWindowV2, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_workspacev2_event() {
+        match parse_event("workspacev2>>3,chat") {
+            HyprEvent::WorkspaceV2 { id, name } => {
+                assert_eq!(id, 3);
+                assert_eq!(name, "chat");
+            }
+            other => panic!("expected WorkspaceV2, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_workspacev2_numeric_name() {
+        match parse_event("workspacev2>>5,5") {
+            HyprEvent::WorkspaceV2 { id, name } => {
+                assert_eq!(id, 5);
+                assert_eq!(name, "5");
+            }
+            other => panic!("expected WorkspaceV2, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_workspacev2_malformed_id_falls_to_other() {
+        // Defensive: if Hyprland ever sent a non-integer id, we surface
+        // it as Other rather than panic or emit a half-formed event.
+        assert!(matches!(
+            parse_event("workspacev2>>notanint,chat"),
+            HyprEvent::Other(_)
+        ));
     }
 }
