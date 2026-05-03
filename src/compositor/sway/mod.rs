@@ -104,6 +104,10 @@ impl Compositor for SwayBackend {
         ))
     }
 
+    fn focus_workspace(&self, workspace: i32) -> Result<()> {
+        self.run_command(&format!("workspace number {}", workspace))
+    }
+
     fn toggle_special_workspace(&self, _name: &str) -> Result<()> {
         // Sway's equivalent of special workspaces is the scratchpad
         self.run_command("scratchpad show")

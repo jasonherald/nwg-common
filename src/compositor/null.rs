@@ -47,6 +47,10 @@ impl Compositor for NullCompositor {
         Err(DockError::NoCompositorDetected)
     }
 
+    fn focus_workspace(&self, _workspace: i32) -> Result<()> {
+        Err(DockError::NoCompositorDetected)
+    }
+
     fn toggle_special_workspace(&self, _name: &str) -> Result<()> {
         Err(DockError::NoCompositorDetected)
     }
@@ -127,6 +131,12 @@ mod tests {
         assert_no_compositor(c.move_to_workspace("x", TEST_WORKSPACE));
         assert_no_compositor(c.toggle_special_workspace("x"));
         assert_no_compositor(c.raise_active());
+    }
+
+    #[test]
+    fn focus_workspace_returns_no_compositor_error() {
+        let c = NullCompositor;
+        assert_no_compositor(c.focus_workspace(TEST_WORKSPACE));
     }
 
     #[test]

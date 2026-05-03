@@ -100,17 +100,32 @@ pub fn init_or_exit(wm_override: Option<WmOverride>) -> Box<dyn Compositor> {
 /// Detects and creates the compositor backend, falling back to NullCompositor
 /// on failure instead of exiting. Used by nwg-drawer so it can run on any
 /// compositor (Niri, river, Openbox, etc.) with graceful feature degradation.
+///
+/// Logs a warning at the fallback point so the user knows they're running
+/// degraded — silent fallback masked the issue for `nwg-dock`'s
+/// `init_or_exit` → `init_or_null` switch in jasonherald/nwg-dock#4.
 pub fn init_or_null(wm_override: Option<WmOverride>) -> Box<dyn Compositor> {
     match detect(wm_override) {
         Ok(kind) => match create(kind) {
             Ok(c) => c,
             Err(e) => {
-                log::warn!("Compositor backend failed: {} — using fallback", e);
+                log::warn!(
+                    "Compositor backend failed: {} — falling back to NullCompositor. \
+                     Live features (event reactions, autohide, workspace switcher) \
+                     will be inactive.",
+                    e
+                );
                 Box::new(NullCompositor)
             }
         },
-        Err(_) => {
-            log::info!("No supported compositor detected — running with limited features");
+        Err(e) => {
+            log::warn!(
+                "Compositor detection failed: {}. No supported compositor detected \
+                 (no HYPRLAND_INSTANCE_SIGNATURE / SWAYSOCK in env). Falling back to \
+                 NullCompositor — live features (event reactions, autohide, workspace \
+                 switcher) will be inactive. Pinned apps and click-to-launch still work.",
+                e
+            );
             Box::new(NullCompositor)
         }
     }

@@ -79,6 +79,11 @@ impl Compositor for HyprlandBackend {
         Ok(())
     }
 
+    fn focus_workspace(&self, workspace: i32) -> Result<()> {
+        ipc::hyprctl(&format!("dispatch workspace {}", workspace))?;
+        Ok(())
+    }
+
     fn toggle_special_workspace(&self, name: &str) -> Result<()> {
         ipc::hyprctl(&format!("dispatch togglespecialworkspace {}", name))?;
         Ok(())
@@ -106,13 +111,23 @@ impl Compositor for HyprlandBackend {
 
 struct HyprlandEventStream(EventStream);
 
+/// Maps a low-level [`HyprEvent`] to the high-level cross-compositor
+/// [`WmEvent`]. Pure — no I/O, no state. Lives outside the
+/// `WmEventStream` impl so unit tests exercise the same code path the
+/// production stream does (the impl below just calls this and wraps
+/// in `Ok`).
+fn map_hypr_event(event: HyprEvent) -> WmEvent {
+    match event {
+        HyprEvent::ActiveWindowV2(addr) => WmEvent::ActiveWindowChanged(addr),
+        HyprEvent::MonitorChanged => WmEvent::MonitorChanged,
+        HyprEvent::WorkspaceV2 { id, name } => WmEvent::WorkspaceChanged { id, name },
+        HyprEvent::Other(s) => WmEvent::Other(s),
+    }
+}
+
 impl WmEventStream for HyprlandEventStream {
     fn next_event(&mut self) -> std::result::Result<WmEvent, std::io::Error> {
-        match self.0.next_event()? {
-            HyprEvent::ActiveWindowV2(addr) => Ok(WmEvent::ActiveWindowChanged(addr)),
-            HyprEvent::MonitorChanged => Ok(WmEvent::MonitorChanged),
-            HyprEvent::Other(s) => Ok(WmEvent::Other(s)),
-        }
+        Ok(map_hypr_event(self.0.next_event()?))
     }
 }
 
@@ -250,5 +265,23 @@ mod tests {
         let wm = to_wm_monitor(test_hypr_monitor(1920, 1080, 0.0, 0));
         assert_eq!(wm.width, 1920);
         assert_eq!(wm.height, 1080);
+    }
+
+    #[test]
+    fn workspace_v2_event_maps_to_workspace_changed() {
+        // Exercises the production mapping function directly so the test
+        // can't drift from the WmEventStream impl (the impl just calls
+        // map_hypr_event + wraps in Ok).
+        let mapped = map_hypr_event(crate::hyprland::events::HyprEvent::WorkspaceV2 {
+            id: 3,
+            name: "chat".into(),
+        });
+        assert_eq!(
+            mapped,
+            WmEvent::WorkspaceChanged {
+                id: 3,
+                name: "chat".into(),
+            }
+        );
     }
 }

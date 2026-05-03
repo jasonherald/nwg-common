@@ -185,17 +185,26 @@ impl WmWorkspace {
 
 /// Events from the compositor event stream.
 ///
-/// Marked `#[non_exhaustive]` so additional variants (e.g. the pending
-/// [`WorkspaceChanged`](#) variant tracked in #127) can be added without
+/// Marked `#[non_exhaustive]` so additional variants can be added without
 /// breaking downstream pattern-match sites. Consumers should include a
 /// `_ => ...` fallback arm.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WmEvent {
     /// Active window changed. Contains the window id.
     ActiveWindowChanged(String),
     /// Monitor added or removed (hotplug).
     MonitorChanged,
+    /// Focused workspace changed. Carries the new workspace's id and
+    /// name so consumers don't need to round-trip through
+    /// `list_workspaces()` for the common case.
+    WorkspaceChanged {
+        /// New focused workspace's numeric id.
+        id: i32,
+        /// New focused workspace's name (may equal the id stringified
+        /// for unnamed workspaces).
+        name: String,
+    },
     /// Any other event.
     Other(String),
 }
