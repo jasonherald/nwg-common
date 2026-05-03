@@ -118,12 +118,13 @@ pub fn init_or_null(wm_override: Option<WmOverride>) -> Box<dyn Compositor> {
                 Box::new(NullCompositor)
             }
         },
-        Err(_) => {
+        Err(e) => {
             log::warn!(
-                "No supported compositor detected (no HYPRLAND_INSTANCE_SIGNATURE \
-                 / SWAYSOCK in env). Falling back to NullCompositor — live features \
-                 (event reactions, autohide, workspace switcher) will be inactive. \
-                 Pinned apps and click-to-launch still work."
+                "Compositor detection failed: {}. No supported compositor detected \
+                 (no HYPRLAND_INSTANCE_SIGNATURE / SWAYSOCK in env). Falling back to \
+                 NullCompositor — live features (event reactions, autohide, workspace \
+                 switcher) will be inactive. Pinned apps and click-to-launch still work.",
+                e
             );
             Box::new(NullCompositor)
         }

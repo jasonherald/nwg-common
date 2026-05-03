@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > preserved in the monorepo's git log; this file only documents changes from
 > v0.3.0 onward.
 
+## [Unreleased]
+
 ## [0.4.0] — 2026-04-29
 
 ### Added
@@ -32,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `Compositor::focus_workspace` is a new required trait
+  method. No external `Compositor` impls exist outside this workspace
+  today, so the impact is bounded; the minor bump signals the contract
+  change.
 - `init_or_null` now warn-logs when falling back to `NullCompositor`,
   listing the degraded features (event reactions, autohide, workspace
   switcher). Previously silent on the "no compositor detected" arm.
@@ -39,12 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (e.g., jasonherald/nwg-dock#4) don't leave users wondering why live
   features are inactive on unsupported compositors (Niri, river,
   Openbox).
-
-### Breaking
-
-- `Compositor::focus_workspace` is a new required trait method. No
-  external `Compositor` impls exist outside this workspace today, so
-  the impact is bounded; the minor bump signals the contract change.
 
 ## [0.3.1] — 2026-04-28
 

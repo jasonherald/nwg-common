@@ -111,14 +111,23 @@ impl Compositor for HyprlandBackend {
 
 struct HyprlandEventStream(EventStream);
 
+/// Maps a low-level [`HyprEvent`] to the high-level cross-compositor
+/// [`WmEvent`]. Pure — no I/O, no state. Lives outside the
+/// `WmEventStream` impl so unit tests exercise the same code path the
+/// production stream does (the impl below just calls this and wraps
+/// in `Ok`).
+fn map_hypr_event(event: HyprEvent) -> WmEvent {
+    match event {
+        HyprEvent::ActiveWindowV2(addr) => WmEvent::ActiveWindowChanged(addr),
+        HyprEvent::MonitorChanged => WmEvent::MonitorChanged,
+        HyprEvent::WorkspaceV2 { id, name } => WmEvent::WorkspaceChanged { id, name },
+        HyprEvent::Other(s) => WmEvent::Other(s),
+    }
+}
+
 impl WmEventStream for HyprlandEventStream {
     fn next_event(&mut self) -> std::result::Result<WmEvent, std::io::Error> {
-        match self.0.next_event()? {
-            HyprEvent::ActiveWindowV2(addr) => Ok(WmEvent::ActiveWindowChanged(addr)),
-            HyprEvent::MonitorChanged => Ok(WmEvent::MonitorChanged),
-            HyprEvent::WorkspaceV2 { id, name } => Ok(WmEvent::WorkspaceChanged { id, name }),
-            HyprEvent::Other(s) => Ok(WmEvent::Other(s)),
-        }
+        Ok(map_hypr_event(self.0.next_event()?))
     }
 }
 
@@ -260,23 +269,13 @@ mod tests {
 
     #[test]
     fn workspace_v2_event_maps_to_workspace_changed() {
-        // Direct mapping check — the WmEventStream impl pulls from the
-        // inner stream; we verify the per-variant arm here without
-        // touching the real Hyprland socket.
-        let hyp = crate::hyprland::events::HyprEvent::WorkspaceV2 {
+        // Exercises the production mapping function directly so the test
+        // can't drift from the WmEventStream impl (the impl just calls
+        // map_hypr_event + wraps in Ok).
+        let mapped = map_hypr_event(crate::hyprland::events::HyprEvent::WorkspaceV2 {
             id: 3,
             name: "chat".into(),
-        };
-        let mapped: WmEvent = match hyp {
-            crate::hyprland::events::HyprEvent::ActiveWindowV2(addr) => {
-                WmEvent::ActiveWindowChanged(addr)
-            }
-            crate::hyprland::events::HyprEvent::MonitorChanged => WmEvent::MonitorChanged,
-            crate::hyprland::events::HyprEvent::WorkspaceV2 { id, name } => {
-                WmEvent::WorkspaceChanged { id, name }
-            }
-            crate::hyprland::events::HyprEvent::Other(s) => WmEvent::Other(s),
-        };
+        });
         assert_eq!(
             mapped,
             WmEvent::WorkspaceChanged {

@@ -25,10 +25,14 @@ fn parse_workspace_event(event: &serde_json::Value) -> Option<WmEvent> {
     if current.is_null() {
         return None;
     }
+    // Use try_from rather than `as i32` so out-of-range values reject the
+    // event rather than silently wrap. Sway's workspace numbers fit in
+    // i32 in practice, but a malformed payload shouldn't produce a
+    // wrapped value that misleads consumers.
     let id = current
         .get("num")
         .and_then(|v| v.as_i64())
-        .map(|n| n as i32)?;
+        .and_then(|n| i32::try_from(n).ok())?;
     let name = current
         .get("name")
         .and_then(|v| v.as_str())

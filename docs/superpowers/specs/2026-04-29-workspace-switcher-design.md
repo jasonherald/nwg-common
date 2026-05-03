@@ -105,14 +105,14 @@ pub enum WmEvent {
 ```rust
 /// Focus the given workspace. Hyprland: `dispatch workspace N`.
 /// Sway: `workspace number N`. NullCompositor: returns an error
-/// (NoCompositor) so callers can degrade gracefully.
+/// (NoCompositorDetected) so callers can degrade gracefully.
 fn focus_workspace(&self, workspace: i32) -> Result<()>;
 ```
 
 **Backend implementations:**
 - Hyprland: `hyprctl dispatch workspace N` via the existing dispatch path.
 - Sway: `swaymsg workspace number N` via the existing IPC client.
-- Null: `Err(DockError::NoCompositor)` — same shape as other Null trait methods.
+- Null: `Err(DockError::NoCompositorDetected)` — same shape as other Null trait methods.
 
 **Emit additions:**
 - Hyprland `events::map`: extend the existing `match` on `HyprEvent` to include `WorkspaceV2 { id, name } => WmEvent::WorkspaceChanged { id, name }`.
