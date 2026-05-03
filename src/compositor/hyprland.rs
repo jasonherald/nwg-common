@@ -79,6 +79,11 @@ impl Compositor for HyprlandBackend {
         Ok(())
     }
 
+    fn focus_workspace(&self, workspace: i32) -> Result<()> {
+        ipc::hyprctl(&format!("dispatch workspace {}", workspace))?;
+        Ok(())
+    }
+
     fn toggle_special_workspace(&self, name: &str) -> Result<()> {
         ipc::hyprctl(&format!("dispatch togglespecialworkspace {}", name))?;
         Ok(())

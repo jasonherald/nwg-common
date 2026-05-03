@@ -33,6 +33,18 @@ pub trait Compositor {
     /// Move a window to a workspace.
     fn move_to_workspace(&self, id: &str, workspace: i32) -> Result<()>;
 
+    /// Focus the given workspace.
+    ///
+    /// Hyprland: `dispatch workspace N`. Sway: `workspace number N`.
+    /// `NullCompositor` returns `DockError::NoCompositorDetected` so
+    /// callers can degrade gracefully (the workspace switcher widget
+    /// in nwg-dock catches this and logs a warning per click).
+    ///
+    /// Distinct from `move_to_workspace(window_id, workspace)` which
+    /// moves a window — `focus_workspace` switches the focused
+    /// workspace itself.
+    fn focus_workspace(&self, workspace: i32) -> Result<()>;
+
     /// Toggle a special/scratchpad workspace.
     /// Hyprland: toggles the named special workspace. Sway: toggles the scratchpad.
     fn toggle_special_workspace(&self, name: &str) -> Result<()>;
