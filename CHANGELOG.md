@@ -12,6 +12,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > preserved in the monorepo's git log; this file only documents changes from
 > v0.3.0 onward.
 
+## [0.4.0] — 2026-04-29
+
+### Added
+
+- `WmEvent::WorkspaceChanged { id: i32, name: String }` — emitted by
+  the Hyprland (`workspacev2`) and Sway (`WorkspaceEvent` with
+  `change: focus`) backends when the focused workspace changes.
+  Enables consumers like the workspace-switcher widget in
+  jasonherald/nwg-dock#4 to react in-frame.
+- `Compositor::focus_workspace(workspace: i32) -> Result<()>` — new
+  trait method for switching the focused workspace. Distinct from the
+  existing `move_to_workspace(window_id, workspace)` which moves a
+  window. Implemented for Hyprland (`hyprctl dispatch workspace N`),
+  Sway (`swaymsg workspace number N`), and `NullCompositor` (returns
+  `DockError::NoCompositorDetected`).
+- `HyprEvent::WorkspaceV2 { id, name }` — backend-internal Hyprland
+  event variant; `parse_event` recognizes `workspacev2>>ID,NAME` lines.
+
+### Changed
+
+- `init_or_null` now warn-logs when falling back to `NullCompositor`,
+  listing the degraded features (event reactions, autohide, workspace
+  switcher). Previously silent on the "no compositor detected" arm.
+  Surfaces the fallback so consumers switching from `init_or_exit`
+  (e.g., jasonherald/nwg-dock#4) don't leave users wondering why live
+  features are inactive on unsupported compositors (Niri, river,
+  Openbox).
+
+### Breaking
+
+- `Compositor::focus_workspace` is a new required trait method. No
+  external `Compositor` impls exist outside this workspace today, so
+  the impact is bounded; the minor bump signals the contract change.
+
 ## [0.3.1] — 2026-04-28
 
 ### Changed
