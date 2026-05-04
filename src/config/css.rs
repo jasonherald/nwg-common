@@ -147,6 +147,7 @@ pub fn watch_css(css_path: &Path, provider: &gtk4::CssProvider) {
 /// On `Err`, the original watcher is preserved and hot-reload continues on
 /// the old file.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CssRebindError {
     /// The new CSS file path could not be accessed; the underlying
     /// `std::io::Error` contains the OS reason (not-found, permission
@@ -202,6 +203,28 @@ pub struct CssWatchHandle {
     /// The GTK provider being kept up to date. Held here so `rebind`
     /// can reload the new CSS into it.
     provider: gtk4::CssProvider,
+}
+
+impl std::fmt::Debug for CssWatchHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `notify::RecommendedWatcher` (inside the shared state) and
+        // `gtk4::CssProvider` aren't `Debug`-printable, so we report
+        // structural facts a downstream consumer can actually use:
+        // the strong-reference count tells you whether the timer
+        // closure is still alive (drops to 1 after the timer's `Weak`
+        // upgrades fail), and the path comes off the locked state.
+        let strong = Arc::strong_count(&self.state);
+        let path = self
+            .state
+            .lock()
+            .ok()
+            .map(|s| s.as_referenced.display().to_string())
+            .unwrap_or_else(|| "<poisoned>".to_string());
+        f.debug_struct("CssWatchHandle")
+            .field("path", &path)
+            .field("strong_refs", &strong)
+            .finish()
+    }
 }
 
 /// Same setup as [`watch_css`], but returns a [`CssWatchHandle`] that can
@@ -308,8 +331,8 @@ impl CssWatchHandle {
     /// Returns [`CssRebindError::Io`] if `new_path` cannot be accessed,
     /// [`CssRebindError::WatcherSetup`] if the notify watcher cannot be
     /// initialised.
-    pub fn rebind(&mut self, new_path: &Path) -> Result<(), CssRebindError> {
-        let new_path_buf = new_path.to_path_buf();
+    pub fn rebind(&mut self, new_path: impl AsRef<Path>) -> Result<(), CssRebindError> {
+        let new_path_buf = new_path.as_ref().to_path_buf();
 
         // Step 1: resolve canonical forms for the new path.
         let (new_as_referenced, new_canonical) =
@@ -336,14 +359,14 @@ impl CssWatchHandle {
         // Step 3: load the new CSS into the provider.  This is a GTK
         // call and is always safe to retry — if it fails GTK logs
         // internally; the old watcher is still untouched.
-        if new_path.exists() {
-            self.provider.load_from_path(new_path);
-            log::info!("CSS rebound: loaded {}", new_path.display());
+        if new_path_buf.exists() {
+            self.provider.load_from_path(&new_path_buf);
+            log::info!("CSS rebound: loaded {}", new_path_buf.display());
         } else {
             self.provider.load_from_data("");
             log::info!(
                 "CSS rebound: {} not found yet — watching for creation",
-                new_path.display()
+                new_path_buf.display()
             );
         }
 
@@ -365,6 +388,17 @@ impl CssWatchHandle {
 /// The timer holds a `Weak` reference to the shared state.  When the
 /// `CssWatchHandle` is dropped, the `Arc` count reaches zero and the
 /// `Weak::upgrade` returns `None`, causing the timer to stop cleanly.
+// NOTE: structurally mirrors `install_reload_timer` below — same
+// `drain_events` → `reload_provider` → `maybe_rebuild_watcher` shape.
+// The functions can't share a body because their `WatchState` ownership
+// models differ: `install_reload_timer` captures `WatchState` by value
+// into the timer closure (so it can mutate freely), while this function
+// holds it behind `Arc<Mutex<RebindableState>>` (so `rebind` can swap
+// the watcher from a different code path). Sharing the path/canonical
+// lookup + watched-set computation is feasible but requires the helper
+// to drop and reacquire the mutex around the GTK call, which is what
+// drives the inline duplication here. A future refactor that unifies
+// both timers under the `Arc<Mutex<>>` model could collapse this.
 fn install_rebindable_timer(
     shared: Arc<Mutex<RebindableState>>,
     provider: gtk4::CssProvider,
