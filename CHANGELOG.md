@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `watch_css_rebindable(path, provider) -> CssWatchHandle` — same setup as
+  `watch_css`, but returns a handle that supports atomically rebinding the
+  inotify watcher to a different CSS file path at runtime. Enables consumers
+  (e.g., `nwg-dock`) to hot-reload a newly-configured `css-file` path without
+  restarting and without losing hot-reload on subsequent edits to the new file.
+  Fixes the silent watcher-stale bug described in
+  [jasonherald/nwg-dock#77](https://github.com/jasonherald/nwg-dock/issues/77)
+  (CR-2026-05-03-26).
+- `CssWatchHandle::rebind(&mut self, new_path: impl AsRef<Path>) -> Result<(), CssRebindError>` —
+  atomically tears down the current watcher, loads the CSS at `new_path` into
+  the existing provider, and starts watching `new_path` instead. If either
+  watcher setup or path resolution fails, the original watcher is preserved and
+  `Err` is returned so the caller can surface the failure.
+- `CssRebindError` — typed error for `CssWatchHandle::rebind`. Distinguishes
+  `Io` (file not found / permission denied) from `WatcherSetup` (notify
+  initialisation failure). Implements `std::error::Error`, `Display`, and
+  `Debug`.
+
 ## [0.4.0] — 2026-04-29
 
 ### Added
