@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fixes the silent watcher-stale bug described in
   [jasonherald/nwg-dock#77](https://github.com/jasonherald/nwg-dock/issues/77)
   (CR-2026-05-03-26).
-- `CssWatchHandle::rebind(&mut self, new_path: &Path) -> Result<(), CssRebindError>` —
+- `CssWatchHandle::rebind(&mut self, new_path: impl AsRef<Path>) -> Result<(), CssRebindError>` —
   atomically tears down the current watcher, loads the CSS at `new_path` into
   the existing provider, and starts watching `new_path` instead. If either
   watcher setup or path resolution fails, the original watcher is preserved and

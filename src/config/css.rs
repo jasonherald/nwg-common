@@ -237,29 +237,23 @@ pub fn watch_css_rebindable(css_path: &Path, provider: &gtk4::CssProvider) -> Cs
     let (tx, rx) = std::sync::mpsc::channel::<()>();
 
     // Compute canonical path for the initial file (same logic as `watch_css`).
+    // A canonicalize failure here (parent missing, permission denied, etc.)
+    // installs a dormant handle: the rebind timer still runs so a future
+    // `rebind` to a working path can resume hot-reload.
     let (as_referenced, canonical) = match compute_canonical_pair(&path) {
-        Some(pair) => pair,
-        None => {
-            // No canonicalisable parent — install a dormant handle that
-            // returns WatcherSetup errors on rebind. The state is
-            // constructed with a dummy empty WatchState (no watcher).
+        Ok(pair) => pair,
+        Err(_) => {
+            // No canonicalisable parent — fall through to the dormant
+            // construction below. We use the original path for both
+            // `as_referenced` and `canonical` because there's nothing
+            // better to point at; both fields are only consulted by
+            // the timer's `drain_events` path, which is a no-op while
+            // `WatchState::_watcher` is None.
             log::debug!(
                 "watch_css_rebindable: cannot resolve path for {}; hot-reload inactive",
                 path.display()
             );
-            let dummy_state = Arc::new(Mutex::new(RebindableState {
-                watch: WatchState {
-                    _watcher: make_null_watcher(),
-                    watched: HashSet::new(),
-                },
-                as_referenced: path.clone(),
-                canonical: path.clone(),
-            }));
-            return CssWatchHandle {
-                state: dummy_state,
-                tx,
-                provider: provider.clone(),
-            };
+            (path.clone(), path.clone())
         }
     };
 
@@ -272,25 +266,26 @@ pub fn watch_css_rebindable(css_path: &Path, provider: &gtk4::CssProvider) -> Cs
         );
     }
 
-    let Some(initial_watch) = build_watch_state(&canonical, &imports, tx.clone()) else {
-        log::warn!(
-            "watch_css_rebindable: failed to set up initial watcher for {}; hot-reload inactive",
-            canonical.display()
-        );
-        let dummy_state = Arc::new(Mutex::new(RebindableState {
-            watch: WatchState {
-                _watcher: make_null_watcher(),
+    // Try to build the initial watcher; if that fails, install a
+    // dormant `WatchState` (no notify watcher, empty watched set).
+    // Crucially we do NOT early-return here — the rebind timer still
+    // gets installed below. Without that, `rx` would be dropped, and
+    // a later successful `rebind()` would set up a new watcher whose
+    // events have nowhere to go (channel disconnected). With the
+    // timer in place, the dormant handle stays "live" — `rebind`
+    // installs a real watcher into the locked state and the timer's
+    // next tick drains the new events normally.
+    let initial_watch =
+        build_watch_state(&canonical, &imports, tx.clone()).unwrap_or_else(|| {
+            log::warn!(
+                "watch_css_rebindable: failed to set up initial watcher for {}; hot-reload inactive until rebind()",
+                canonical.display()
+            );
+            WatchState {
+                _watcher: None,
                 watched: HashSet::new(),
-            },
-            as_referenced,
-            canonical,
-        }));
-        return CssWatchHandle {
-            state: dummy_state,
-            tx,
-            provider: provider.clone(),
-        };
-    };
+            }
+        });
 
     let shared = Arc::new(Mutex::new(RebindableState {
         watch: initial_watch,
@@ -334,17 +329,14 @@ impl CssWatchHandle {
     pub fn rebind(&mut self, new_path: impl AsRef<Path>) -> Result<(), CssRebindError> {
         let new_path_buf = new_path.as_ref().to_path_buf();
 
-        // Step 1: resolve canonical forms for the new path.
+        // Step 1: resolve canonical forms for the new path. The
+        // underlying canonicalize() error (PermissionDenied, NotFound,
+        // EIO, etc.) flows through verbatim so the caller sees the real
+        // OS reason rather than a synthesized NotFound.
         let (new_as_referenced, new_canonical) =
-            compute_canonical_pair(&new_path_buf).ok_or_else(|| {
-                // The parent directory doesn't exist — treat as I/O error.
-                CssRebindError::Io {
-                    path: new_path_buf.clone(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "parent directory does not exist",
-                    ),
-                }
+            compute_canonical_pair(&new_path_buf).map_err(|source| CssRebindError::Io {
+                path: new_path_buf.clone(),
+                source,
             })?;
 
         // Step 2: build the new watcher BEFORE touching the old one
@@ -465,41 +457,61 @@ fn install_rebindable_timer(
 }
 
 /// Computes the `(as_referenced, canonical)` path pair used throughout the
-/// watcher, or returns `None` if the path has no canonicalisable parent
-/// directory (e.g. a bare filename with no directory component).
+/// watcher. Returns `Err` when the path has no canonicalisable parent
+/// directory or `canonicalize()` fails for any other OS reason
+/// (PermissionDenied, EIO, etc.); the underlying `std::io::Error` is
+/// preserved so callers can surface the real failure mode in their error
+/// types instead of synthesising a fake `NotFound`.
 ///
 /// The same two-form invariant as `watch_css` applies: `as_referenced` is
 /// what GTK gets (so relative `@import` resolution agrees with ours), and
 /// `canonical` is what inotify events carry (so event paths match the
 /// watched set).
-fn compute_canonical_pair(path: &Path) -> Option<(PathBuf, PathBuf)> {
-    let parent = path.parent()?;
-    let file_name = path.file_name()?;
-    let main_dir = parent.canonicalize().ok()?;
+fn compute_canonical_pair(path: &Path) -> Result<(PathBuf, PathBuf), std::io::Error> {
+    // Bare filename with no parent component: there's no directory to
+    // canonicalize against. Synthesize a NotFound here — there's no
+    // OS-side error to preserve since we never made the syscall.
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "path '{}' has no parent directory to canonicalize",
+                path.display()
+            ),
+        )
+    })?;
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("path '{}' has no file-name component", path.display()),
+        )
+    })?;
+    // Pass the real canonicalize() error through. PermissionDenied,
+    // NotFound, EIO, etc. all surface accurately to the caller.
+    let main_dir = parent.canonicalize()?;
     let canonical = main_dir.join(file_name);
-    Some((path.to_path_buf(), canonical))
-}
-
-/// Creates a minimal no-op `notify::RecommendedWatcher` used as a placeholder
-/// when the real watcher cannot be set up (e.g. missing parent directory).
-/// The returned watcher is not subscribed to any path and fires no events.
-fn make_null_watcher() -> notify::RecommendedWatcher {
-    // The handler discards everything; errors are unreachable on a watcher
-    // that's never subscribed to any path.
-    notify::recommended_watcher(|_: Result<notify::Event, notify::Error>| {})
-        .expect("notify::recommended_watcher must succeed for a no-op watcher")
+    Ok((path.to_path_buf(), canonical))
 }
 
 /// Everything required to keep the `notify` watcher alive and to know
 /// which files are currently tracked, so we can diff against a
 /// re-scanned set on each reload.
 struct WatchState {
-    /// Owns the notify worker thread — dropped means "stop watching".
-    /// The leading underscore tells both the compiler and future
-    /// readers that this field is intentionally never read: its entire
-    /// purpose is RAII lifetime management. When a new `WatchState`
-    /// replaces this one, dropping the old field stops its worker.
-    _watcher: notify::RecommendedWatcher,
+    /// Owns the notify worker thread — dropping `Some(_)` stops the
+    /// worker. The leading underscore tells both the compiler and
+    /// future readers that this field is intentionally never read:
+    /// its entire purpose is RAII lifetime management.
+    ///
+    /// `None` is the dormant state used when the rebindable handle
+    /// can't set up a real watcher at construction time (parent
+    /// missing, `notify::recommended_watcher` failed, etc.). The
+    /// handle is still alive and `rebind` can succeed later; until
+    /// then no events fire and `watched` stays empty. Modeling
+    /// dormancy this way avoids the prior `make_null_watcher` shape
+    /// that retried the same constructor that just failed and could
+    /// panic on the exact resource-exhaustion fallback it was meant
+    /// to survive.
+    _watcher: Option<notify::RecommendedWatcher>,
     /// Absolute paths we signal reloads for. Compared structurally
     /// to detect `@import` set changes across reloads.
     watched: HashSet<PathBuf>,
@@ -548,7 +560,7 @@ fn build_watch_state(
         return None;
     }
     Some(WatchState {
-        _watcher: watcher,
+        _watcher: Some(watcher),
         watched,
     })
 }
@@ -2106,14 +2118,20 @@ mod tests {
         cleanup_test_dir(&tmp);
     }
 
-    /// `compute_canonical_pair` returns `None` for a path whose parent
-    /// directory does not exist.
+    /// `compute_canonical_pair` returns `Err` preserving the OS error
+    /// when the parent directory does not exist (or any other
+    /// canonicalize() failure).
     #[test]
-    fn canonical_pair_returns_none_for_missing_parent() {
+    fn canonical_pair_returns_err_for_missing_parent() {
         let path = Path::new("/nonexistent/dir/style.css");
+        let err = compute_canonical_pair(path).expect_err("missing parent dir must yield Err");
+        // The OS reports this as NotFound on Linux; we don't pin the
+        // exact ErrorKind across platforms but we confirm it surfaces
+        // a real io::Error rather than being collapsed.
         assert!(
-            compute_canonical_pair(path).is_none(),
-            "missing parent dir must yield None"
+            err.kind() == std::io::ErrorKind::NotFound,
+            "expected NotFound for missing parent, got: {:?}",
+            err.kind()
         );
     }
 
