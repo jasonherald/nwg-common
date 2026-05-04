@@ -133,8 +133,15 @@ pub fn watch_css(css_path: &Path, provider: &gtk4::CssProvider) {
     }
 
     let (tx, rx) = std::sync::mpsc::channel::<()>();
-    let Some(initial) = build_watch_state(&canonical_path, &imports, tx.clone()) else {
-        return;
+    let initial = match build_watch_state(&canonical_path, &imports, tx.clone()) {
+        Ok(state) => state,
+        Err(_) => {
+            // build_watch_state already logged the underlying notify
+            // error at warn level; the one-shot `watch_css` API has
+            // no Result to return, so we log-and-continue with no
+            // hot-reload (matches the pre-Result behavior).
+            return;
+        }
     };
     install_reload_timer(path, canonical_path, provider.clone(), rx, tx, initial);
 }
@@ -242,15 +249,20 @@ pub fn watch_css_rebindable(css_path: &Path, provider: &gtk4::CssProvider) -> Cs
     // `rebind` to a working path can resume hot-reload.
     let (as_referenced, canonical) = match compute_canonical_pair(&path) {
         Ok(pair) => pair,
-        Err(_) => {
-            // No canonicalisable parent — fall through to the dormant
+        Err(e) => {
+            // Canonicalize failed — fall through to the dormant
             // construction below. We use the original path for both
             // `as_referenced` and `canonical` because there's nothing
             // better to point at; both fields are only consulted by
             // the timer's `drain_events` path, which is a no-op while
             // `WatchState::_watcher` is None.
+            //
+            // Surface the underlying io::Error so the user can see
+            // whether this was missing-parent, permission-denied, EIO,
+            // etc. rather than every dormant-startup looking the same
+            // in logs.
             log::debug!(
-                "watch_css_rebindable: cannot resolve path for {}; hot-reload inactive",
+                "watch_css_rebindable: cannot resolve path for {}; hot-reload inactive: {e}",
                 path.display()
             );
             (path.clone(), path.clone())
@@ -276,9 +288,9 @@ pub fn watch_css_rebindable(css_path: &Path, provider: &gtk4::CssProvider) -> Cs
     // installs a real watcher into the locked state and the timer's
     // next tick drains the new events normally.
     let initial_watch =
-        build_watch_state(&canonical, &imports, tx.clone()).unwrap_or_else(|| {
+        build_watch_state(&canonical, &imports, tx.clone()).unwrap_or_else(|e| {
             log::warn!(
-                "watch_css_rebindable: failed to set up initial watcher for {}; hot-reload inactive until rebind()",
+                "watch_css_rebindable: failed to set up initial watcher for {}; hot-reload inactive until rebind(): {e}",
                 canonical.display()
             );
             WatchState {
@@ -341,11 +353,19 @@ impl CssWatchHandle {
 
         // Step 2: build the new watcher BEFORE touching the old one
         // (atomicity — if this fails, old watcher is still live).
+        // The underlying notify error (CreateFailed or WatchFailed) is
+        // surfaced through `BuildWatchError`'s Display so the caller
+        // sees something actionable like "failed to watch directory
+        // '/etc/nwg-dock-hyprland': Operation not permitted (os error 1)"
+        // rather than the previous generic "failed to initialise
+        // notify watcher".
         let new_imports = discover_watched_imports(&new_as_referenced);
-        let new_watch = build_watch_state(&new_canonical, &new_imports, self.tx.clone())
-            .ok_or_else(|| CssRebindError::WatcherSetup {
-                path: new_path_buf.clone(),
-                message: "failed to initialise notify watcher".to_string(),
+        let new_watch =
+            build_watch_state(&new_canonical, &new_imports, self.tx.clone()).map_err(|e| {
+                CssRebindError::WatcherSetup {
+                    path: new_path_buf.clone(),
+                    message: e.to_string(),
+                }
             })?;
 
         // Step 3: load the new CSS into the provider.  This is a GTK
@@ -432,16 +452,17 @@ fn install_rebindable_timer(
                             "CSS @import set changed; rebuilding watcher for {}",
                             as_referenced.display()
                         );
-                        if let Some(new_watch) =
-                            build_watch_state(&canonical, &new_imports, tx_clone)
-                        {
-                            let mut state = arc.lock().unwrap_or_else(|e| e.into_inner());
-                            state.watch = new_watch;
-                        } else {
-                            log::warn!(
-                                "Failed to rebuild CSS watcher for {}; keeping previous watch set",
-                                as_referenced.display()
-                            );
+                        match build_watch_state(&canonical, &new_imports, tx_clone) {
+                            Ok(new_watch) => {
+                                let mut state = arc.lock().unwrap_or_else(|e| e.into_inner());
+                                state.watch = new_watch;
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to rebuild CSS watcher for {}; keeping previous watch set: {e}",
+                                    as_referenced.display()
+                                );
+                            }
                         }
                     }
                     gtk4::glib::ControlFlow::Continue
@@ -517,16 +538,50 @@ struct WatchState {
     watched: HashSet<PathBuf>,
 }
 
+/// Internal error returned by [`build_watch_state`]. Captures whether
+/// the failure came from creating the `notify::RecommendedWatcher` or
+/// from subscribing it to a directory; either reason flows through to
+/// callers so they can surface the real cause (rather than a generic
+/// "failed to initialise notify watcher" message).
+#[derive(Debug)]
+enum BuildWatchError {
+    /// `notify::recommended_watcher` itself failed (e.g. inotify
+    /// resource exhaustion at the kernel level).
+    CreateFailed(notify::Error),
+    /// `watcher.watch(dir, ...)` failed for at least one directory.
+    /// Stores the FIRST failing directory's error — additional
+    /// failures are logged inside `build_watch_state` for diagnosis
+    /// but only one is surfaced through the return.
+    WatchFailed { dir: PathBuf, source: notify::Error },
+}
+
+impl std::fmt::Display for BuildWatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BuildWatchError::CreateFailed(e) => {
+                write!(f, "failed to create notify watcher: {e}")
+            }
+            BuildWatchError::WatchFailed { dir, source } => {
+                write!(f, "failed to watch directory '{}': {source}", dir.display())
+            }
+        }
+    }
+}
+
 /// Builds a fresh `WatchState` for the given main CSS path plus the
 /// current set of imported files. Subscribes the watcher to the
 /// parent directory of the main CSS AND the parent directory of each
-/// import (the same dir if they share a parent). Returns `None` if
-/// the watcher itself can't be created — callers log-and-continue.
+/// import (the same dir if they share a parent). Returns `Err` with
+/// the underlying notify error if the watcher itself can't be created
+/// or any `watch(...)` call fails — callers can then either log-and-
+/// continue (the fall-through-to-dormant pattern in
+/// `watch_css_rebindable`) or surface the error to their own caller
+/// (the `rebind` path that wraps it in `CssRebindError::WatcherSetup`).
 fn build_watch_state(
     main_css: &Path,
     imports: &[PathBuf],
     tx: std::sync::mpsc::Sender<()>,
-) -> Option<WatchState> {
+) -> Result<WatchState, BuildWatchError> {
     use notify::{RecursiveMode, Watcher};
 
     let watched = compute_watched_set(main_css, imports);
@@ -535,8 +590,10 @@ fn build_watch_state(
     let mut watcher = match notify::recommended_watcher(make_css_handler(watched.clone(), tx)) {
         Ok(w) => w,
         Err(e) => {
-            log::warn!("Failed to create CSS watcher: {}", e);
-            return None;
+            // Log with the full message AND propagate so the error
+            // type carries the same string for callers that want it.
+            log::warn!("Failed to create CSS watcher: {e}");
+            return Err(BuildWatchError::CreateFailed(e));
         }
     };
     // If any `watch(...)` call fails, the returned `WatchState` would
@@ -549,17 +606,19 @@ fn build_watch_state(
     // `@import` set or restarts. Failing fast here lets the outer
     // reload-loop (or the startup path) surface the issue instead of
     // silently degrading. CodeRabbit catch on #76.
-    let mut watch_failed = false;
+    let mut first_failure: Option<(PathBuf, notify::Error)> = None;
     for dir in &dirs {
         if let Err(e) = watcher.watch(dir, RecursiveMode::NonRecursive) {
-            log::warn!("Failed to watch CSS directory '{}': {}", dir.display(), e);
-            watch_failed = true;
+            log::warn!("Failed to watch CSS directory '{}': {e}", dir.display());
+            if first_failure.is_none() {
+                first_failure = Some((dir.clone(), e));
+            }
         }
     }
-    if watch_failed {
-        return None;
+    if let Some((dir, source)) = first_failure {
+        return Err(BuildWatchError::WatchFailed { dir, source });
     }
-    Some(WatchState {
+    Ok(WatchState {
         _watcher: Some(watcher),
         watched,
     })
@@ -660,10 +719,9 @@ fn maybe_rebuild_watcher(
     // Build the new state BEFORE dropping the old one so we don't have
     // a window where nothing is watching. The old `state.watcher` is
     // dropped at the assignment below, which stops its worker thread.
-    if let Some(new_state) = build_watch_state(canonical, &new_imports, tx.clone()) {
-        *state = new_state;
-    } else {
-        log::warn!("Failed to rebuild CSS watcher; keeping previous watch set");
+    match build_watch_state(canonical, &new_imports, tx.clone()) {
+        Ok(new_state) => *state = new_state,
+        Err(e) => log::warn!("Failed to rebuild CSS watcher; keeping previous watch set: {e}"),
     }
 }
 
@@ -2123,8 +2181,12 @@ mod tests {
     /// canonicalize() failure).
     #[test]
     fn canonical_pair_returns_err_for_missing_parent() {
-        let path = Path::new("/nonexistent/dir/style.css");
-        let err = compute_canonical_pair(path).expect_err("missing parent dir must yield Err");
+        // Build a never-created subpath under a controlled tempdir
+        // so the test can't accidentally pass (or fail) because of
+        // some pre-existing absolute path on the test machine.
+        let tmp = make_test_dir("canonical-pair-missing");
+        let path = tmp.join("never-created").join("style.css");
+        let err = compute_canonical_pair(&path).expect_err("missing parent dir must yield Err");
         // The OS reports this as NotFound on Linux; we don't pin the
         // exact ErrorKind across platforms but we confirm it surfaces
         // a real io::Error rather than being collapsed.
@@ -2133,6 +2195,7 @@ mod tests {
             "expected NotFound for missing parent, got: {:?}",
             err.kind()
         );
+        cleanup_test_dir(&tmp);
     }
 
     /// `rebind` to a different file that exists returns `Ok`.
@@ -2171,7 +2234,10 @@ mod tests {
     fn rebind_to_missing_parent_returns_err_handle_survives() {
         let tmp = make_test_dir("rebind-missing-parent");
         let original = tmp.join("original.css");
-        let bad_path = Path::new("/nonexistent/dir/style.css");
+        // Build the bad path under our tempdir so the parent's
+        // non-existence is controlled by the fixture rather than the
+        // test machine's filesystem layout.
+        let bad_path = tmp.join("never-created").join("style.css");
         let good_target = tmp.join("target.css");
         std::fs::write(&original, "window { color: red; }").expect("write original.css");
         std::fs::write(&good_target, "window { color: blue; }").expect("write target.css");
@@ -2180,7 +2246,7 @@ mod tests {
         let mut handle = watch_css_rebindable(&original, &provider);
 
         // First rebind to a nonexistent parent — must fail.
-        let err = handle.rebind(bad_path);
+        let err = handle.rebind(&bad_path);
         assert!(
             matches!(err, Err(CssRebindError::Io { .. })),
             "expected Io error for missing parent dir, got {:?}",
