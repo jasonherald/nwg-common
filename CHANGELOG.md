@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-05-05
+
+### Fixed
+
+- `desktop::icons::create_pixbuf` and `desktop::icons::pixbuf_from_file`
+  now cache decoded pixbufs to prevent unbounded memory growth on
+  long-running consumers that re-load the same icons. The name cache
+  is invalidated on `GtkIconTheme::changed` so theme switches still
+  pick up fresh icons. See
+  [jasonherald/nwg-dock#83](https://github.com/jasonherald/nwg-dock/issues/83)
+  for the underlying glycin per-call leak this works around.
+
 ## [0.5.0] — 2026-05-04
 
 ### Added
