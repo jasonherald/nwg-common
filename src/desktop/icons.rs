@@ -1,6 +1,8 @@
 use crate::desktop::dirs::search_desktop_dirs;
 use crate::desktop::entry::parse_desktop_file;
 use gtk4::prelude::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Resolves the icon name for an application.
@@ -87,11 +89,59 @@ fn find_desktop_file(app_name: &str, app_dirs: &[PathBuf]) -> Option<PathBuf> {
     }
 }
 
+// Pixbuf cache rationale.
+//
+// `gdk_pixbuf_new_from_file_at_scale` delegates to glycin in modern
+// gdk-pixbuf builds, and glycin leaks a few KiB of decoder state per
+// call (jasonherald/nwg-dock#83). On a long-running dock that rebuilds
+// icons on every focus event, that compounded to a 15.9 GiB peak over
+// 2.5 days uptime — heaptrack confirmed the leak is per-decode.
+//
+// Caching by `(icon, size)` / `(path, w, h)` means we only invoke the
+// glycin path once per unique input. `gtk4::gdk_pixbuf::Pixbuf` is a
+// GObject; `clone()` is a refcount bump (g_object_ref) — cheap. The
+// cache holds its own ref forever, callers receive a refcount-bumped
+// clone.
+//
+// Bounded by `unique_inputs` — typical dock has ~10 icons × ~5 sizes
+// (icon-size scaling kicks in as item count grows) plus ~6 indicator
+// SVGs × handful of sizes. Cap is well under 1 MiB of pixbuf data per
+// process, so we don't bother with eviction.
+//
+// `thread_local!` rather than `static`: `gtk4::gdk_pixbuf::Pixbuf` is
+// `!Send` (gtk4-rs marks GObjects main-thread-only), so a `Mutex<...>`
+// in a `static` can't satisfy `Sync`. All callers run on the GTK main
+// thread today (icon loads happen inside button-rebuild code paths
+// driven by GLib timers / signal handlers), so per-thread storage is
+// the natural fit.
+
+thread_local! {
+    static NAME_PIXBUF_CACHE: RefCell<HashMap<(String, i32), gtk4::gdk_pixbuf::Pixbuf>> =
+        RefCell::new(HashMap::new());
+    static FILE_PIXBUF_CACHE: RefCell<HashMap<(PathBuf, i32, i32), gtk4::gdk_pixbuf::Pixbuf>> =
+        RefCell::new(HashMap::new());
+}
+
 /// Creates a GTK4 pixbuf from an icon name or path.
 ///
-/// If `icon` is an absolute path, loads from file.
-/// Otherwise, tries the icon theme, then falls back to desktop file lookup.
+/// If `icon` is an absolute path, loads from file. Otherwise, tries the
+/// icon theme, then falls back to `/usr/share/pixmaps`.
+///
+/// Decoded pixbufs are cached by `(icon, size)` for the lifetime of the
+/// process — see the cache rationale in this module's source.
 pub fn create_pixbuf(icon: &str, size: i32) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
+    let key = (icon.to_string(), size);
+    if let Some(pb) = NAME_PIXBUF_CACHE.with(|c| c.borrow().get(&key).cloned()) {
+        return Some(pb);
+    }
+    let pb = create_pixbuf_uncached(icon, size)?;
+    NAME_PIXBUF_CACHE.with(|c| c.borrow_mut().insert(key, pb.clone()));
+    Some(pb)
+}
+
+/// Cache-bypassing decode used by [`create_pixbuf`] on miss. Kept private
+/// so consumers always go through the cache.
+fn create_pixbuf_uncached(icon: &str, size: i32) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
     // Absolute path
     if icon.contains('/') {
         return gtk4::gdk_pixbuf::Pixbuf::from_file_at_size(icon, size, size).ok();
@@ -157,6 +207,16 @@ pub fn create_image(app_id: &str, size: i32, app_dirs: &[PathBuf]) -> Option<gtk
 }
 
 /// Loads a pixbuf from a file path at the given dimensions.
+///
+/// Decoded pixbufs are cached by `(path, width, height)` for the
+/// lifetime of the process — see the cache rationale in this module's
+/// source.
 pub fn pixbuf_from_file(path: &Path, width: i32, height: i32) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
-    gtk4::gdk_pixbuf::Pixbuf::from_file_at_size(path, width, height).ok()
+    let key = (path.to_path_buf(), width, height);
+    if let Some(pb) = FILE_PIXBUF_CACHE.with(|c| c.borrow().get(&key).cloned()) {
+        return Some(pb);
+    }
+    let pb = gtk4::gdk_pixbuf::Pixbuf::from_file_at_size(path, width, height).ok()?;
+    FILE_PIXBUF_CACHE.with(|c| c.borrow_mut().insert(key, pb.clone()));
+    Some(pb)
 }
