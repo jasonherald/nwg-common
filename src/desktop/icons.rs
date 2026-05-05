@@ -1,7 +1,7 @@
 use crate::desktop::dirs::search_desktop_dirs;
 use crate::desktop::entry::parse_desktop_file;
 use gtk4::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -120,6 +120,32 @@ thread_local! {
         RefCell::new(HashMap::new());
     static FILE_PIXBUF_CACHE: RefCell<HashMap<(PathBuf, i32, i32), gtk4::gdk_pixbuf::Pixbuf>> =
         RefCell::new(HashMap::new());
+    /// Set to `true` after the first successful install of the
+    /// `GtkIconTheme::changed` listener that clears `NAME_PIXBUF_CACHE`.
+    /// Stays `false` until a `gdk::Display` is available (the listener
+    /// install retries on every cache miss before that).
+    static THEME_LISTENER_INSTALLED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Installs (once) a `GtkIconTheme::changed` listener that clears
+/// `NAME_PIXBUF_CACHE`. Re-calling is a no-op via the install-flag.
+///
+/// Called from `create_pixbuf` so that the listener is wired up the
+/// first time the cache is consulted with a Display available — earlier
+/// calls (before any window has presented) silently no-op and retry.
+fn ensure_theme_listener() {
+    if THEME_LISTENER_INSTALLED.with(Cell::get) {
+        return;
+    }
+    let Some(display) = gtk4::gdk::Display::default() else {
+        return;
+    };
+    let theme = gtk4::IconTheme::for_display(&display);
+    theme.connect_changed(|_| {
+        NAME_PIXBUF_CACHE.with(|c| c.borrow_mut().clear());
+        log::debug!("Icon theme changed; cleared name pixbuf cache");
+    });
+    THEME_LISTENER_INSTALLED.with(|c| c.set(true));
 }
 
 /// Creates a GTK4 pixbuf from an icon name or path.
@@ -127,9 +153,13 @@ thread_local! {
 /// If `icon` is an absolute path, loads from file. Otherwise, tries the
 /// icon theme, then falls back to `/usr/share/pixmaps`.
 ///
-/// Decoded pixbufs are cached by `(icon, size)` for the lifetime of the
-/// process — see the cache rationale in this module's source.
+/// Decoded pixbufs are cached by `(icon, size)` per thread — see the
+/// cache rationale in this module's source. The cache is cleared
+/// automatically when the user's icon theme changes (the
+/// `GtkIconTheme::changed` listener is installed lazily on first call
+/// with a `gdk::Display` available).
 pub fn create_pixbuf(icon: &str, size: i32) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
+    ensure_theme_listener();
     let key = (icon.to_string(), size);
     if let Some(pb) = NAME_PIXBUF_CACHE.with(|c| c.borrow().get(&key).cloned()) {
         return Some(pb);
@@ -208,9 +238,13 @@ pub fn create_image(app_id: &str, size: i32, app_dirs: &[PathBuf]) -> Option<gtk
 
 /// Loads a pixbuf from a file path at the given dimensions.
 ///
-/// Decoded pixbufs are cached by `(path, width, height)` for the
-/// lifetime of the process — see the cache rationale in this module's
-/// source.
+/// Decoded pixbufs are cached by `(path, width, height)` per thread for
+/// the lifetime of the thread — see the cache rationale in this
+/// module's source. The cache does **not** track file mtime: callers
+/// must use this only for paths whose contents are stable across the
+/// process lifetime (e.g. assets shipped with the binary). Mutable
+/// paths must go through `gtk4::gdk_pixbuf::Pixbuf::from_file_at_size`
+/// directly to bypass the cache.
 pub fn pixbuf_from_file(path: &Path, width: i32, height: i32) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
     let key = (path.to_path_buf(), width, height);
     if let Some(pb) = FILE_PIXBUF_CACHE.with(|c| c.borrow().get(&key).cloned()) {

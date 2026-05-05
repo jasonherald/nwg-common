@@ -19,20 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `desktop::icons::create_pixbuf` and `desktop::icons::pixbuf_from_file`
-  now cache decoded pixbufs by `(icon, size)` / `(path, w, h)` for the
-  lifetime of the process. The underlying
-  `gdk_pixbuf_new_from_file_at_scale` path goes through glycin in modern
-  gdk-pixbuf builds, and glycin leaks a few KiB of decoder state per
-  call. heaptrack tracing on `nwg-dock` traced that to a 15.9 GiB peak
-  RSS over 2.5 days uptime
-  ([jasonherald/nwg-dock#83](https://github.com/jasonherald/nwg-dock/issues/83))
-  via the dock's per-rebuild icon-load path. Caching means we only
-  invoke the glycin path once per unique input; `gtk4::gdk_pixbuf::Pixbuf`
-  is a GObject so cached entries are refcount-bump cheap on hit. Cache
-  is `thread_local!` (Pixbuf is `!Send` so a `static Mutex<...>` won't
-  satisfy `Sync`), bounded by unique inputs (~50 entries for a typical
-  dock, well under 1 MiB total). Drawer and notifications consumers
-  pick up the same fix automatically with a dep bump.
+  now cache decoded pixbufs to prevent unbounded memory growth on
+  long-running consumers that re-load the same icons. The name cache
+  is invalidated on `GtkIconTheme::changed` so theme switches still
+  pick up fresh icons. See
+  [jasonherald/nwg-dock#83](https://github.com/jasonherald/nwg-dock/issues/83)
+  for the underlying glycin per-call leak this works around.
 
 ## [0.5.0] — 2026-05-04
 
