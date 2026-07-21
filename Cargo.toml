@@ -1,8 +1,8 @@
 [package]
 name = "nwg-common"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97"
 license = "MIT"
 description = "Shared library for nwg-dock, nwg-drawer, and nwg-notifications — compositor-neutral IPC abstraction for Hyprland and Sway, .desktop parsing, CSS hot-reload, and related system plumbing."
 readme = "README.md"
@@ -12,8 +12,8 @@ categories = ["gui", "config"]
 
 [dependencies]
 # GTK4 + Wayland layer shell
-gtk4 = "0.10"
-gtk4-layer-shell = "0.7"
+gtk4 = "0.11"
+gtk4-layer-shell = "0.8"
 
 # Serialization (Hyprland JSON IPC + sway i3-ipc)
 serde = { version = "1", features = ["derive"] }

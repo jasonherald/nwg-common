@@ -14,6 +14,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-21
+
+### Changed
+
+- **Breaking:** `gtk4` bumped `0.10` → `0.11` and `gtk4-layer-shell`
+  `0.7` → `0.8`. GTK types appear in the public API
+  (`config::css::load_css` returns `gtk4::CssProvider`,
+  `layer_shell::create_fullscreen_backdrops` takes GTK types,
+  `desktop::icons` returns gdk-pixbuf types), so consumers must move to
+  the gtk4-rs `0.11` release train in the same update. No source changes
+  were required in this crate — the `0.11` API surface we use is
+  unchanged.
+- MSRV raised `1.95` → `1.97`; `rust-toolchain.toml` now pins `1.97.1`.
+- Routine compatible dependency refresh via `cargo update` (clap 4.6.3,
+  libc 0.2.188, log 0.4.33, nix 0.31.3, serde 1.0.229, serde_json
+  1.0.151, thiserror 2.0.19, and transitive updates).
+- `deny.toml`: dropped stale skips for the resolved `anstream 0.6/1.0`
+  and `toml_datetime` duplicate splits; added a skip for the new
+  `syn 2/3` split (serde_derive and thiserror-impl are on syn 3 while
+  clap_derive, futures-macro, glib-macros, and gtk4-macros remain on
+  syn 2).
+
 ## [0.5.1] — 2026-05-05
 
 ### Fixed

@@ -53,17 +53,14 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 allow = []
 deny = []
-# Transitive duplicates from env_logger (anstream 0.6) vs clap (anstream 1.0).
-# Both are latest versions — waiting on env_logger to adopt anstream 1.0.
+# Transitive syn 2 vs 3 split: serde_derive and thiserror-impl moved to syn 3,
+# while clap_derive / futures-macro / glib-macros / gtk4-macros are still on
+# syn 2. Both are latest for their consumers — waiting on the GTK4 macro
+# stack and clap to adopt syn 3.
 skip = [
-    { crate = "anstream@0.6", reason = "env_logger 0.11 depends on anstream 0.6, clap 4.6 uses 1.0" },
-    { crate = "anstyle-parse@0.2", reason = "transitive from anstream 0.6 vs 1.0 split" },
+    { crate = "syn@2", reason = "clap_derive, futures-macro, glib-macros, gtk4-macros still on syn 2; serde/thiserror use syn 3" },
 ]
-# toml_datetime split is deep in GTK4's build dependency tree (system-deps → toml
-# vs proc-macro-crate → toml_edit). No action possible from our side.
-skip-tree = [
-    { crate = "toml_datetime@0.7", reason = "GTK4 build dep (system-deps) uses older toml chain" },
-]
+skip-tree = []
 
 # =============================================================================
 # Sources — only allow crates from crates.io
