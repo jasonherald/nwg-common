@@ -27,14 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were required in this crate — the `0.11` API surface we use is
   unchanged.
 - MSRV raised `1.95` → `1.97`; `rust-toolchain.toml` now pins `1.97.1`.
-- Routine compatible dependency refresh via `cargo update` (clap 4.6.3,
-  libc 0.2.188, log 0.4.33, nix 0.31.3, serde 1.0.229, serde_json
-  1.0.151, thiserror 2.0.19, and transitive updates).
-- `deny.toml`: dropped stale skips for the resolved `anstream 0.6/1.0`
-  and `toml_datetime` duplicate splits; added a skip for the new
-  `syn 2/3` split (serde_derive and thiserror-impl are on syn 3 while
-  clap_derive, futures-macro, glib-macros, and gtk4-macros remain on
-  syn 2).
 
 ## [0.5.1] — 2026-05-05
 
