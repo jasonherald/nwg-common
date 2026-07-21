@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-21
+
+### Changed
+
+- **Breaking:** `gtk4` bumped `0.10` → `0.11` and `gtk4-layer-shell`
+  `0.7` → `0.8`. GTK types appear in the public API
+  (`config::css::load_css` returns `gtk4::CssProvider`,
+  `layer_shell::create_fullscreen_backdrops` takes GTK types,
+  `desktop::icons` returns gdk-pixbuf types), so consumers must move to
+  the gtk4-rs `0.11` release train in the same update. No source changes
+  were required in this crate — the `0.11` API surface we use is
+  unchanged.
+- MSRV raised `1.95` → `1.97`; `rust-toolchain.toml` now pins `1.97.1`.
+
 ## [0.5.1] — 2026-05-05
 
 ### Fixed
