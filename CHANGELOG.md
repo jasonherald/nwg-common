@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state stays a single IPC round-trip. Classic hyprlang sessions are
   unaffected. (nwg-dock #90)
 
+### Added
+
+- `DockError::DispatchRejected`, returned when Hyprland rejects a
+  dispatcher in both syntaxes. Note for exhaustive `match`es on
+  `DockError`: this is a new variant (no known consumer matches the
+  enum exhaustively; the in-tree consumers all go through
+  `Result`/`Display`).
+
 ## [0.6.0] — 2026-07-21
 
 ### Changed

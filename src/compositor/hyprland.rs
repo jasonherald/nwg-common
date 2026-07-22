@@ -70,6 +70,9 @@ pub struct HyprlandBackend {
 }
 
 impl HyprlandBackend {
+    /// Creates a new backend, failing if `HYPRLAND_INSTANCE_SIGNATURE`
+    /// is unset. Dispatch syntax starts [`DispatchSyntax::Unknown`] and
+    /// is learned on first dispatch.
     pub fn new() -> Result<Self> {
         ipc::instance_signature()?;
         Ok(Self {
@@ -217,11 +220,16 @@ impl Compositor for HyprlandBackend {
     }
 
     fn toggle_special_workspace(&self, name: &str) -> Result<()> {
+        // Strip line breaks before either form: they would split/corrupt
+        // the legacy socket line, and there is no meaningful workspace
+        // name containing one. The Lua escape below still covers quotes
+        // and backslashes for the Lua literal.
+        let name = name.replace(['\n', '\r'], "");
         self.dispatch(
             &format!("togglespecialworkspace {name}"),
             &format!(
                 "hl.dsp.workspace.toggle_special(\"{}\")",
-                lua_string_escape(name)
+                lua_string_escape(&name)
             ),
         )
     }
