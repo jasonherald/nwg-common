@@ -12,7 +12,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > preserved in the monorepo's git log; this file only documents changes from
 > v0.3.0 onward.
 
-## [Unreleased]
+## [0.7.1] — Unreleased
+
+## [0.7.0] — 2026-07-21
+
+### Changed
+
+- **Breaking:** `DockError` is now `#[non_exhaustive]` — matches on it
+  must carry a wildcard arm. Done so future error-variant additions
+  (like this release's `DispatchRejected`) are semver-minor instead of
+  forcing a major bump each time.
+
+### Fixed
+
+- Window actions (focus on click, close, float, fullscreen, move/switch
+  workspace, launch) now work on Hyprland 0.55+ sessions using the new
+  Lua configuration. Such sessions evaluate IPC dispatch commands as
+  Lua, rejecting the legacy textual dispatchers; the Hyprland backend
+  now detects the rejection, retries in the session's syntax
+  (`hl.dsp.*`), and caches which one the compositor speaks so steady
+  state stays a single IPC round-trip. Classic hyprlang sessions are
+  unaffected. (nwg-dock #90)
+
+### Added
+
+- `DockError::DispatchRejected`, returned when Hyprland rejects a
+  dispatcher in both syntaxes.
 
 ## [0.6.0] — 2026-07-21
 

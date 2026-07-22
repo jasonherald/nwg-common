@@ -5,11 +5,28 @@ use std::path::PathBuf;
 /// Re-exported at the crate root as `nwg_common::DockError` so consumers
 /// can pattern-match on errors returned by the [`Compositor`](crate::compositor::Compositor)
 /// trait and other public APIs without reaching into an `error` submodule.
+///
+/// Marked `#[non_exhaustive]`: new error variants are added as compositor
+/// coverage grows, and this keeps those additions semver-minor. Matches
+/// must carry a wildcard arm.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum DockError {
     /// Underlying compositor IPC I/O failure (socket connect, read, write).
     #[error("compositor IPC error: {0}")]
     Ipc(#[from] std::io::Error),
+
+    /// Hyprland rejected a `dispatch` command in both the legacy textual
+    /// syntax and the 0.55+ Lua syntax, or answered a dispatch with a
+    /// reply the backend doesn't recognize.
+    #[error("Hyprland rejected dispatcher '{command}': {reply}")]
+    DispatchRejected {
+        /// The dispatcher whose reply produced this error (legacy or Lua
+        /// form) — always the same attempt `reply` came from.
+        command: String,
+        /// Hyprland's reply to that attempt, trimmed.
+        reply: String,
+    },
 
     /// The JSON returned by a compositor IPC query didn't parse into the
     /// expected type.
