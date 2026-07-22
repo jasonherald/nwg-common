@@ -11,6 +11,16 @@ pub enum DockError {
     #[error("compositor IPC error: {0}")]
     Ipc(#[from] std::io::Error),
 
+    /// Hyprland rejected a `dispatch` command in both the legacy textual
+    /// syntax and the 0.55+ Lua syntax.
+    #[error("Hyprland rejected dispatcher '{command}': {reply}")]
+    DispatchRejected {
+        /// The dispatcher as first attempted (legacy or Lua form).
+        command: String,
+        /// Hyprland's reply to the final attempt.
+        reply: String,
+    },
+
     /// The JSON returned by a compositor IPC query didn't parse into the
     /// expected type.
     #[error("JSON parse error: {0}")]
