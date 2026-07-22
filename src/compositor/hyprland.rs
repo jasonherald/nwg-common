@@ -27,25 +27,35 @@ enum DispatchSyntax {
 enum DispatchReply {
     /// "ok" — dispatched.
     Ok,
-    /// The dispatcher itself was rejected: classic sessions answer
-    /// "Invalid dispatcher" for Lua payloads, Lua sessions answer with a
-    /// Lua evaluation error ("error: …") for legacy payloads. Worth
+    /// The dispatcher itself was rejected — the documented markers only:
+    /// classic sessions answer exactly "Invalid dispatcher" for Lua
+    /// payloads; Lua sessions append "your syntax might need to be
+    /// updated" when the payload wasn't a valid Lua dispatch. Worth
     /// retrying in the other syntax.
     WrongSyntax,
-    /// Syntax accepted but the dispatch didn't apply (e.g. "No such
-    /// window found" / "warning: … window not found"). Not retried —
-    /// the target is gone, not the grammar.
+    /// Syntax accepted but the dispatch didn't apply, in a form we
+    /// recognize ("No such window found" classic, "warning: …" Lua).
+    /// Not retried — the target is gone, not the grammar.
     Failed,
+    /// Anything else — empty reply, permission or protocol errors,
+    /// semantic Lua errors ("error: …" without the syntax note), or
+    /// future message shapes. Neither retried (a retry loop on a
+    /// semantic error would be wrong) nor cached (guessing the session
+    /// syntax from an unrecognized reply could poison the cache), and
+    /// surfaced as an error rather than swallowed.
+    Unexpected,
 }
 
 fn classify_dispatch_reply(reply: &str) -> DispatchReply {
     let t = reply.trim();
     if t == "ok" {
         DispatchReply::Ok
-    } else if t.starts_with("Invalid dispatcher") || t.starts_with("error:") {
+    } else if t == "Invalid dispatcher" || t.contains("your syntax might need to be updated") {
         DispatchReply::WrongSyntax
-    } else {
+    } else if t == "No such window found" || t.starts_with("warning:") {
         DispatchReply::Failed
+    } else {
+        DispatchReply::Unexpected
     }
 }
 
@@ -109,6 +119,10 @@ impl HyprlandBackend {
                 log::debug!("dispatch '{first}' did not apply: {}", reply.trim());
                 Ok(())
             }
+            DispatchReply::Unexpected => Err(DockError::DispatchRejected {
+                command: first.to_string(),
+                reply: reply.trim().to_string(),
+            }),
             DispatchReply::WrongSyntax => {
                 let reply2 = ipc::hyprctl(&format!("dispatch {second}"))?;
                 let reply2 = String::from_utf8_lossy(&reply2);
@@ -122,10 +136,19 @@ impl HyprlandBackend {
                         log::debug!("dispatch '{second}' did not apply: {}", reply2.trim());
                         Ok(())
                     }
-                    DispatchReply::WrongSyntax => Err(DockError::DispatchRejected {
-                        command: first.to_string(),
-                        reply: reply2.trim().to_string(),
-                    }),
+                    DispatchReply::WrongSyntax | DispatchReply::Unexpected => {
+                        // Both attempts rejected. The error pairs the second
+                        // attempt with its own reply; the first rejection is
+                        // only interesting for debugging.
+                        log::debug!(
+                            "dispatch '{first}' rejected as wrong syntax: {}",
+                            reply.trim()
+                        );
+                        Err(DockError::DispatchRejected {
+                            command: second.to_string(),
+                            reply: reply2.trim().to_string(),
+                        })
+                    }
                 }
             }
         }
@@ -373,6 +396,30 @@ mod tests {
             classify_dispatch_reply("warning: =[C]:-1: hl.focus: window not found"),
             DispatchReply::Failed
         );
+    }
+
+    #[test]
+    fn classify_semantic_lua_error_is_not_wrong_syntax() {
+        // A semantic Lua error (verbatim from probing a wrong argument
+        // shape) starts with "error:" but lacks the syntax note —
+        // retrying it in legacy syntax would be wrong, and caching a
+        // syntax from it would be a guess. It must be Unexpected.
+        let reply = "error: =[C]:-1: hl.workspace.change_id: expected a table { workspace, id }";
+        assert_eq!(classify_dispatch_reply(reply), DispatchReply::Unexpected);
+    }
+
+    #[test]
+    fn classify_unrecognized_replies_are_unexpected() {
+        // Empty, permission-style, and future message shapes must not be
+        // collapsed into "target missing" (which caches the syntax and
+        // reports success) — they get the explicit Unexpected path.
+        for reply in ["", "  ", "Permission denied", "Invalid workspace", "oki"] {
+            assert_eq!(
+                classify_dispatch_reply(reply),
+                DispatchReply::Unexpected,
+                "reply {reply:?} must classify as Unexpected"
+            );
+        }
     }
 
     // ─── Lua string escaping ───────────────────────────────────────────────

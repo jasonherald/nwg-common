@@ -17,12 +17,14 @@ pub enum DockError {
     Ipc(#[from] std::io::Error),
 
     /// Hyprland rejected a `dispatch` command in both the legacy textual
-    /// syntax and the 0.55+ Lua syntax.
+    /// syntax and the 0.55+ Lua syntax, or answered a dispatch with a
+    /// reply the backend doesn't recognize.
     #[error("Hyprland rejected dispatcher '{command}': {reply}")]
     DispatchRejected {
-        /// The dispatcher as first attempted (legacy or Lua form).
+        /// The dispatcher whose reply produced this error (legacy or Lua
+        /// form) — always the same attempt `reply` came from.
         command: String,
-        /// Hyprland's reply to the final attempt.
+        /// Hyprland's reply to that attempt, trimmed.
         reply: String,
     },
 
