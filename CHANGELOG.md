@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-21
+
+### Changed
+
+- **Breaking:** `DockError` is now `#[non_exhaustive]` — matches on it
+  must carry a wildcard arm. Done so future error-variant additions
+  (like this release's `DispatchRejected`) are semver-minor instead of
+  forcing a major bump each time. No in-tree consumer matches the enum
+  exhaustively; all three binaries consume it via `Result`/`Display`.
+
 ### Fixed
 
 - Window actions (focus on click, close, float, fullscreen, move/switch
@@ -28,10 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `DockError::DispatchRejected`, returned when Hyprland rejects a
-  dispatcher in both syntaxes. Note for exhaustive `match`es on
-  `DockError`: this is a new variant (no known consumer matches the
-  enum exhaustively; the in-tree consumers all go through
-  `Result`/`Display`).
+  dispatcher in both syntaxes.
 
 ## [0.6.0] — 2026-07-21
 

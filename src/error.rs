@@ -5,7 +5,12 @@ use std::path::PathBuf;
 /// Re-exported at the crate root as `nwg_common::DockError` so consumers
 /// can pattern-match on errors returned by the [`Compositor`](crate::compositor::Compositor)
 /// trait and other public APIs without reaching into an `error` submodule.
+///
+/// Marked `#[non_exhaustive]`: new error variants are added as compositor
+/// coverage grows, and this keeps those additions semver-minor. Matches
+/// must carry a wildcard arm.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum DockError {
     /// Underlying compositor IPC I/O failure (socket connect, read, write).
     #[error("compositor IPC error: {0}")]
