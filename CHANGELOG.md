@@ -12,8 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > preserved in the monorepo's git log; this file only documents changes from
 > v0.3.0 onward.
 
-## [Unreleased]
-
 ## [0.7.0] — 2026-07-21
 
 ### Changed
@@ -21,8 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `DockError` is now `#[non_exhaustive]` — matches on it
   must carry a wildcard arm. Done so future error-variant additions
   (like this release's `DispatchRejected`) are semver-minor instead of
-  forcing a major bump each time. No in-tree consumer matches the enum
-  exhaustively; all three binaries consume it via `Result`/`Display`.
+  forcing a major bump each time.
 
 ### Fixed
 
